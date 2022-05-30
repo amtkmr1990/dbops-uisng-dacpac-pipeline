@@ -1,0 +1,73 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger: none
+
+pool: 
+  vmImage: 'windows-2019'
+
+stages:
+  - stage: BuildDBSoln
+    jobs: 
+    - job: builddb
+      displayName: 'Build DB Proj'
+      steps:
+
+      - task: VSBuild@1
+        inputs:
+          solution: 'project_DB/project_DB.sqlproj'
+          platform: 'Any CPU'
+          configuration: 'Release'
+
+      - task: CopyFiles@2
+        inputs:
+          SourceFolder: '$(Build.SourcesDirectory)'
+          Contents: '**\*.dacpac'
+          TargetFolder: '$(build.artifactstagingdirectory)'
+          flattenFolders: true
+      
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+          ArtifactName: 'drop'
+          publishLocation: 'Container'
+
+  # deploying to dev database 
+  - stage: devDatabase
+    pool: 'LYB Internal Agent Pool'
+    displayName: 'Deploy Dev dacpac'
+    variables:
+    - name: DBServerName
+      value: 'databaseendpoint'
+    - name: DBName
+      value: 'dbname'
+    jobs:
+      - deployment: Deploy
+        environment: project_DB_DEV
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                 
+                - task: DownloadPipelineArtifact@2
+                  inputs:
+                    buildType: 'current'
+                    artifactName: 'drop'
+                    targetPath: '$(System.ArtifactsDirectory)'
+                
+                - task: SqlAzureDacpacDeployment@1
+                  inputs:
+                    azureSubscription: 'dbops-nonprod'
+                    AuthenticationType: 'servicePrincipal'
+                    ServerName: '$(DBServerName)'
+                    DatabaseName: '$(DBName)'
+                    deployType: 'DacpacTask'
+                    DeploymentAction: 'Publish'
+                    DacpacFile: '$(System.ArtifactsDirectory)/**/*.dacpac'
+                    AdditionalArguments: '/p:ScriptDatabaseOptions=False' # incase you want to aviod any commands at database server level
+                    IpDetectionMethod: 'AutoDetect'
+
+ # for stg copy the same dev stage and replace values are per stg 
+
